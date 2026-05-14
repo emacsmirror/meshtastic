@@ -134,7 +134,7 @@ M-x package-install RET meshtastic RET
 
 ```elisp
 (use-package meshtastic
-  :vc (:url "https://github.com/androsfenollosa/meshtastic.el"
+  :vc (:url "https://git.andros.dev/andros/meshtastic.el"
        :rev :newest)
   :config
   (setq meshtastic-serial-port "/dev/ttyUSB0"))
@@ -154,7 +154,7 @@ M-x package-install RET meshtastic RET
 Clone the repository and place the files on your `load-path`:
 
 ```sh
-git clone https://github.com/androsfenollosa/meshtastic.el.git
+git clone https://git.andros.dev/andros/meshtastic.el.git
 ```
 
 Add to your init file:

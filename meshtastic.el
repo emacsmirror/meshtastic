@@ -4,10 +4,10 @@
 
 ;; Author: Andros Fenollosa <hi@andros.dev>
 ;; Maintainer: Andros Fenollosa <hi@andros.dev>
-;; Version: 0.1.0
+;; Version: 1.0.0
 ;; Package-Requires: ((emacs "28.1"))
 ;; Keywords: comm
-;; URL: https://github.com/androsfenollosa/meshtastic.el
+;; URL: https://git.andros.dev/andros/meshtastic.el
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
