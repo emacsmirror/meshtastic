@@ -391,7 +391,10 @@
   (meshtastic--send-cmd '((action . "nodes")))
   (message "Meshtastic: connected as %s (%s)"
            (or meshtastic--my-long-name "?")
-           (or meshtastic--my-node-id "?")))
+           (or meshtastic--my-node-id "?"))
+  (let ((buf (get-buffer "*Meshtastic*")))
+    (when (buffer-live-p buf)
+      (meshtastic--render-welcome))))
 
 (defun meshtastic--on-message (obj)
   "Handle an incoming message OBJ from the bridge."
@@ -728,8 +731,6 @@ CMD-ID is used to update the delivery icon when the bridge confirms."
       (setq buf (get-buffer-create name))
       (with-current-buffer buf
         (meshtastic-mode)
-        (setq meshtastic--target ttype
-              meshtastic--target meshtastic--target)
         (setq meshtastic--target target
               meshtastic--target-type ttype)
         (meshtastic--setup-prompt))
