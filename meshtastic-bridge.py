@@ -17,8 +17,7 @@ try:
     import meshtastic.serial_interface
     from pubsub import pub
 except ImportError as exc:
-    print(json.dumps({"type": "error", "message": f"Import failed: {exc}"}),
-          flush=True)
+    print(json.dumps({"type": "error", "message": f"Import failed: {exc}"}), flush=True)
     sys.exit(1)
 
 _iface = None
@@ -41,19 +40,21 @@ def _on_receive(packet, interface):  # noqa: ARG001
             return
         from_id = packet.get("fromId") or _node_id_from_num(packet.get("from"))
         to_id = packet.get("toId") or _node_id_from_num(packet.get("to"))
-        _emit({
-            "type": "message",
-            "id": packet.get("id"),
-            "from": from_id,
-            "to": to_id,
-            "text": decoded.get("text", ""),
-            "channel": packet.get("channel", 0),
-            "rxTime": packet.get("rxTime") or int(time.time()),
-            "rxSnr": packet.get("rxSnr"),
-            "rxRssi": packet.get("rxRssi"),
-            "hopLimit": packet.get("hopLimit"),
-            "hopStart": packet.get("hopStart"),
-        })
+        _emit(
+            {
+                "type": "message",
+                "id": packet.get("id"),
+                "from": from_id,
+                "to": to_id,
+                "text": decoded.get("text", ""),
+                "channel": packet.get("channel", 0),
+                "rxTime": packet.get("rxTime") or int(time.time()),
+                "rxSnr": packet.get("rxSnr"),
+                "rxRssi": packet.get("rxRssi"),
+                "hopLimit": packet.get("hopLimit"),
+                "hopStart": packet.get("hopStart"),
+            }
+        )
     except Exception as exc:
         _emit({"type": "error", "message": str(exc)})
 
@@ -75,12 +76,14 @@ def _on_connection(interface, topic=pub.AUTO_TOPIC):  # noqa: ARG001
             short_name = user.get("shortName", "")
         except Exception:
             node_id = long_name = short_name = ""
-    _emit({
-        "type": "connected",
-        "nodeId": node_id,
-        "longName": long_name,
-        "shortName": short_name,
-    })
+    _emit(
+        {
+            "type": "connected",
+            "nodeId": node_id,
+            "longName": long_name,
+            "shortName": short_name,
+        }
+    )
 
 
 def _send_nodes():
@@ -90,16 +93,20 @@ def _send_nodes():
     try:
         for key, node in (_iface.nodes or {}).items():
             user = node.get("user", {})
-            node_id = user.get("id") or (key if isinstance(key, str) else _node_id_from_num(key))
-            nodes.append({
-                "nodeId": node_id,
-                "nodeNum": node.get("num"),
-                "longName": user.get("longName", ""),
-                "shortName": user.get("shortName", ""),
-                "hopsAway": node.get("hopsAway", 0),
-                "lastHeard": node.get("lastHeard", 0),
-                "snr": node.get("snr"),
-            })
+            node_id = user.get("id") or (
+                key if isinstance(key, str) else _node_id_from_num(key)
+            )
+            nodes.append(
+                {
+                    "nodeId": node_id,
+                    "nodeNum": node.get("num"),
+                    "longName": user.get("longName", ""),
+                    "shortName": user.get("shortName", ""),
+                    "hopsAway": node.get("hopsAway", 0),
+                    "lastHeard": node.get("lastHeard", 0),
+                    "snr": node.get("snr"),
+                }
+            )
     except Exception as exc:
         _emit({"type": "error", "message": str(exc)})
         return
@@ -116,11 +123,13 @@ def _send_channels():
             name = ""
             if ch.settings:
                 name = ch.settings.name or ""
-            channels.append({
-                "index": ch.index,
-                "name": name,
-                "role": role,
-            })
+            channels.append(
+                {
+                    "index": ch.index,
+                    "name": name,
+                    "role": role,
+                }
+            )
     except Exception as exc:
         _emit({"type": "error", "message": str(exc)})
         return
@@ -133,12 +142,14 @@ def _send_info():
     try:
         my = _iface.getMyNodeInfo() or {}
         user = my.get("user", {})
-        _emit({
-            "type": "info",
-            "nodeId": user.get("id", ""),
-            "longName": user.get("longName", ""),
-            "shortName": user.get("shortName", ""),
-        })
+        _emit(
+            {
+                "type": "info",
+                "nodeId": user.get("id", ""),
+                "longName": user.get("longName", ""),
+                "shortName": user.get("shortName", ""),
+            }
+        )
     except Exception as exc:
         _emit({"type": "error", "message": str(exc)})
 
