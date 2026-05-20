@@ -174,6 +174,72 @@ Add to your init file:
 5. Type your message and press `RET` to send.
 6. Run `M-x meshtastic-disconnect` to stop the bridge.
 
+## Configuration examples
+
+### Linux, pip
+
+The default configuration works out of the box after `pip install meshtastic`.
+Adjust the serial port to match your device:
+
+```elisp
+(use-package meshtastic
+  :ensure t
+  :config
+  (setq meshtastic-serial-port "/dev/ttyUSB0"))
+```
+
+Find your port with `ls /dev/ttyUSB* /dev/ttyACM*` after plugging in the device.
+
+### macOS, pip
+
+macOS serial ports use a `cu.usbserial-*` naming scheme:
+
+```elisp
+(use-package meshtastic
+  :ensure t
+  :config
+  (setq meshtastic-serial-port "/dev/cu.usbserial-0001"))
+```
+
+Find your port with `ls /dev/cu.usbserial-*` or `ls /dev/cu.SLAB_USBtoUART*`.
+
+### macOS, uv
+
+If you manage the Python environment with [uv](https://docs.astral.sh/uv/),
+clone the repository (it includes a `pyproject.toml` with the `meshtastic`
+dependency) and point the executable at `uv run python`:
+
+```sh
+git clone https://git.andros.dev/andros/meshtastic.el.git
+cd meshtastic.el
+uv sync          # creates .venv and installs meshtastic
+```
+
+```elisp
+(use-package meshtastic
+  :load-path "~/path/to/meshtastic.el"
+  :config
+  (setq meshtastic-serial-port "/dev/cu.usbserial-0001")
+  (setq meshtastic-python-executable "/opt/homebrew/bin/uv run python"))
+```
+
+`uv run python` resolves the `.venv` from the package directory automatically;
+no manual activation is needed.
+
+### Windows
+
+Serial ports on Windows are named `COMn`:
+
+```elisp
+(use-package meshtastic
+  :ensure t
+  :config
+  (setq meshtastic-serial-port "COM3")
+  (setq meshtastic-python-executable "python"))
+```
+
+Check Device Manager under "Ports (COM & LPT)" for the correct number.
+
 ## Customization
 
 Run `M-x customize-group RET meshtastic RET` to list all options.
@@ -181,7 +247,7 @@ Run `M-x customize-group RET meshtastic RET` to list all options.
 Key options:
 
 - `meshtastic-serial-port` (default `"/dev/ttyUSB0"`): path to the serial device.
-- `meshtastic-python-executable` (default `"python3"`): Python binary used to launch the bridge.
+- `meshtastic-python-executable` (default `"python3"`): Python binary used to launch the bridge. Supports multi-word values such as `"uv run python"`.
 - `meshtastic-bridge-script`: path to `meshtastic-bridge.py`, auto-resolved from the package directory.
 - `meshtastic-notify` (default `t`): enable desktop notifications (via D-Bus).
 - `meshtastic-timestamp-format` (default `"%H:%M"`): format for message timestamps.
