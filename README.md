@@ -253,6 +253,24 @@ Key options:
 - `meshtastic-timestamp-format` (default `"%H:%M"`): format for message timestamps.
 - `meshtastic-message-history` (default `200`): number of messages kept in memory per channel or DM.
 
+## Development
+
+### Running the tests
+
+Install dev dependencies and run the test suite with [uv](https://docs.astral.sh/uv/):
+
+```sh
+uv sync --group dev
+uv run pytest
+```
+
+Or with pip:
+
+```sh
+pip install pytest
+pytest
+```
+
 ## Notes
 
 - **No message history on startup**: unlike server-based clients, the bridge has no database. Only messages received since the bridge started are available.

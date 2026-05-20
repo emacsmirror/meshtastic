@@ -10,3 +10,7 @@ main.py
 
 # pytest
 .pytest_cache/
+
+# melpazoid (local review tool, not part of the package)
+melpazoid/
+_native_deps
