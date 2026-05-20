@@ -336,7 +336,7 @@
 
 (defun meshtastic--handle-line (line)
   "Parse a JSON LINE from the bridge and dispatch to the correct handler."
-  (condition-case err
+  (condition-case _err
       (let* ((json-object-type 'alist)
              (json-array-type 'list)
              (json-key-type 'symbol)
@@ -351,7 +351,7 @@
           ("sent"      (meshtastic--on-sent obj))
           ("error"     (message "Meshtastic bridge: %s"
                                 (alist-get 'message obj)))))
-    (error (message "Meshtastic parse error: %s" err))))
+    (error (message "Meshtastic bridge stderr: %s" line))))
 
 (defun meshtastic--start ()
   "Launch the Python bridge subprocess."
@@ -359,17 +359,18 @@
     (delete-process meshtastic--process))
   (unless (file-exists-p meshtastic-bridge-script)
     (user-error "Bridge script not found: %s" meshtastic-bridge-script))
-  (setq meshtastic--process
-        (make-process
-         :name "meshtastic-bridge"
-         :command (list meshtastic-python-executable
-                        "-u"
-                        meshtastic-bridge-script
-                        meshtastic-serial-port)
-         :filter #'meshtastic--process-filter
-         :sentinel #'meshtastic--process-sentinel
-         :connection-type 'pipe
-         :noquery t))
+  (let ((default-directory (file-name-directory meshtastic-bridge-script)))
+    (setq meshtastic--process
+          (make-process
+           :name "meshtastic-bridge"
+           :command (append (split-string meshtastic-python-executable)
+                            (list "-u"
+                                  meshtastic-bridge-script
+                                  meshtastic-serial-port))
+           :filter #'meshtastic--process-filter
+           :sentinel #'meshtastic--process-sentinel
+           :connection-type 'pipe
+           :noquery t)))
   (message "Meshtastic: connecting on %s..." meshtastic-serial-port))
 
 (defun meshtastic--ensure-connected ()

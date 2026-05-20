@@ -59,6 +59,15 @@ def _on_receive(packet, interface):  # noqa: ARG001
         _emit({"type": "error", "message": str(exc)})
 
 
+def _on_disconnect(interface, topic=pub.AUTO_TOPIC):  # noqa: ARG001
+    _emit({"type": "error", "message": "Device disconnected"})
+    try:
+        interface.close()
+    except Exception:
+        pass
+    sys.exit(0)
+
+
 def _on_connection(interface, topic=pub.AUTO_TOPIC):  # noqa: ARG001
     try:
         my = interface.getMyNodeInfo() or {}
@@ -161,6 +170,7 @@ def main():
 
     pub.subscribe(_on_receive, "meshtastic.receive.text")
     pub.subscribe(_on_connection, "meshtastic.connection.established")
+    pub.subscribe(_on_disconnect, "meshtastic.connection.lost")
 
     try:
         _iface = meshtastic.serial_interface.SerialInterface(devPath=port)
@@ -168,40 +178,44 @@ def main():
         _emit({"type": "error", "message": str(exc)})
         sys.exit(1)
 
-    for raw_line in sys.stdin:
-        line = raw_line.strip()
-        if not line:
-            continue
-        try:
-            cmd = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+    try:
+        for raw_line in sys.stdin:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                cmd = json.loads(line)
+            except json.JSONDecodeError:
+                continue
 
-        action = cmd.get("action", "")
-        cmd_id = cmd.get("id")
+            action = cmd.get("action", "")
+            cmd_id = cmd.get("id")
 
-        try:
-            if action == "send":
-                text = cmd.get("text", "")
-                channel = int(cmd.get("channel", 0))
-                dest = cmd.get("dest") or None
-                _iface.sendText(
-                    text,
-                    channelIndex=channel,
-                    destinationId=dest,
-                    wantAck=(dest is not None),
-                )
-                _emit({"type": "sent", "id": cmd_id})
-            elif action == "nodes":
-                _send_nodes()
-            elif action == "channels":
-                _send_channels()
-            elif action == "info":
-                _send_info()
-            elif action == "quit":
-                break
-        except Exception as exc:
-            _emit({"type": "error", "message": str(exc), "id": cmd_id})
+            try:
+                if action == "send":
+                    text = cmd.get("text", "")
+                    channel = int(cmd.get("channel", 0))
+                    dest = cmd.get("dest") or None
+                    send_kwargs: dict = {
+                        "channelIndex": channel,
+                        "wantAck": dest is not None,
+                    }
+                    if dest is not None:
+                        send_kwargs["destinationId"] = dest
+                    _iface.sendText(text, **send_kwargs)
+                    _emit({"type": "sent", "id": cmd_id})
+                elif action == "nodes":
+                    _send_nodes()
+                elif action == "channels":
+                    _send_channels()
+                elif action == "info":
+                    _send_info()
+                elif action == "quit":
+                    break
+            except Exception as exc:
+                _emit({"type": "error", "message": str(exc), "id": cmd_id})
+    except Exception as exc:
+        _emit({"type": "error", "message": f"Bridge loop error: {exc}"})
 
     try:
         _iface.close()
