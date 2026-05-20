@@ -425,7 +425,10 @@
   (let ((buf (get-buffer "*Meshtastic: Nodes*")))
     (when (buffer-live-p buf)
       (with-current-buffer buf
-        (meshtastic--populate-node-list)))))
+        (meshtastic--populate-node-list))))
+  (let ((buf (get-buffer "*Meshtastic*")))
+    (when (buffer-live-p buf)
+      (meshtastic--render-welcome))))
 
 (defun meshtastic--on-channels (obj)
   "Handle a channels data OBJ from the bridge."
@@ -433,7 +436,10 @@
   (let ((buf (get-buffer "*Meshtastic: Channels*")))
     (when (buffer-live-p buf)
       (with-current-buffer buf
-        (meshtastic--populate-channel-list)))))
+        (meshtastic--populate-channel-list))))
+  (let ((buf (get-buffer "*Meshtastic*")))
+    (when (buffer-live-p buf)
+      (meshtastic--render-welcome))))
 
 (defun meshtastic--on-info (obj)
   "Handle a device info OBJ from the bridge."
@@ -960,10 +966,20 @@ TEXT is the message body; TARGET-TYPE and TARGET identify the conversation."
         (insert (format "  Port:      %s\n" meshtastic-serial-port))
         (insert (format "  Status:    %s\n"
                         (propertize
-                         (if meshtastic--connected "Connected" "Disconnected")
-                         'face (if meshtastic--connected
-                                   'meshtastic-delivery-confirmed-face
-                                 'meshtastic-delivery-failed-face))))
+                         (cond
+                          (meshtastic--connected "Connected")
+                          ((and meshtastic--process
+                                (process-live-p meshtastic--process))
+                           "Connecting...")
+                          (t "Disconnected"))
+                         'face (cond
+                                (meshtastic--connected
+                                 'meshtastic-delivery-confirmed-face)
+                                ((and meshtastic--process
+                                      (process-live-p meshtastic--process))
+                                 'meshtastic-delivery-pending-face)
+                                (t
+                                 'meshtastic-delivery-failed-face)))))
         (when meshtastic--my-long-name
           (insert (format "  Node:      %s (%s)\n"
                           meshtastic--my-long-name
