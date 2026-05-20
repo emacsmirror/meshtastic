@@ -9,6 +9,7 @@ Usage: python3 meshtastic-bridge.py [/dev/ttyUSB0]
 """
 
 import json
+import os
 import sys
 import time
 
@@ -65,7 +66,10 @@ def _on_disconnect(interface, topic=pub.AUTO_TOPIC):  # noqa: ARG001
         interface.close()
     except Exception:
         pass
-    sys.exit(0)
+    # os._exit terminates the whole process from any thread.
+    # sys.exit() only raises SystemExit in the calling thread (the meshtastic
+    # reader thread), leaving the main stdin loop blocked indefinitely.
+    os._exit(0)
 
 
 def _on_connection(interface, topic=pub.AUTO_TOPIC):  # noqa: ARG001
@@ -77,7 +81,7 @@ def _on_connection(interface, topic=pub.AUTO_TOPIC):  # noqa: ARG001
         short_name = user.get("shortName", "")
     except Exception:
         try:
-            node_num = interface.myInfo.myNodeNum if interface.myInfo else 0
+            node_num = interface.myInfo.my_node_num if interface.myInfo else 0
             node_id = _node_id_from_num(node_num)
             node = (interface.nodes or {}).get(node_id, {})
             user = node.get("user", {})

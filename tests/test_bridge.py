@@ -248,7 +248,7 @@ class TestOnConnection:
     def test_fallback_when_getMyNodeInfo_raises(self, capsys):
         iface = MagicMock()
         iface.getMyNodeInfo.side_effect = Exception("timeout")
-        iface.myInfo.myNodeNum = 0xAABBCCDD
+        iface.myInfo.my_node_num = 0xAABBCCDD  # protobuf snake_case
         iface.nodes = {
             "!aabbccdd": {"user": {"longName": "Fallback", "shortName": "FB"}}
         }
@@ -275,25 +275,25 @@ class TestOnConnection:
 
 
 class TestOnDisconnect:
-    def test_emits_error_and_exits_with_zero(self, capsys):
-        with pytest.raises(SystemExit) as exc_info:
-            bridge._on_disconnect(MagicMock())
-        assert exc_info.value.code == 0
+    def test_emits_error_and_exits_with_zero(self, capsys, monkeypatch):
+        exited = {}
+        monkeypatch.setattr(bridge.os, "_exit", lambda code: exited.update({"code": code}))
+        bridge._on_disconnect(MagicMock())
+        assert exited == {"code": 0}
         msgs = _parse_stdout(capsys)
         assert msgs[0]["type"] == "error"
         assert "disconnect" in msgs[0]["message"].lower()
 
-    def test_close_exception_does_not_propagate(self, capsys):
+    def test_close_exception_does_not_propagate(self, capsys, monkeypatch):
+        monkeypatch.setattr(bridge.os, "_exit", lambda code: None)
         iface = MagicMock()
         iface.close.side_effect = Exception("port gone")
-        with pytest.raises(SystemExit) as exc_info:
-            bridge._on_disconnect(iface)
-        assert exc_info.value.code == 0
+        bridge._on_disconnect(iface)  # must not raise
 
-    def test_calls_close_on_interface(self, capsys):
+    def test_calls_close_on_interface(self, capsys, monkeypatch):
+        monkeypatch.setattr(bridge.os, "_exit", lambda code: None)
         iface = MagicMock()
-        with pytest.raises(SystemExit):
-            bridge._on_disconnect(iface)
+        bridge._on_disconnect(iface)
         iface.close.assert_called_once()
 
 
