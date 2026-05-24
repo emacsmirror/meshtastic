@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026  Andros Fenollosa <hi@andros.dev>
 """Meshtastic JSON bridge for meshtastic.el.
 
 Connects to a Meshtastic device over serial, outputs received messages as
@@ -106,9 +107,7 @@ def _send_nodes():
     try:
         for key, node in (_iface.nodes or {}).items():
             user = node.get("user", {})
-            node_id = user.get("id") or (
-                key if isinstance(key, str) else _node_id_from_num(key)
-            )
+            node_id = user.get("id") or (key if isinstance(key, str) else _node_id_from_num(key))
             nodes.append(
                 {
                     "nodeId": node_id,

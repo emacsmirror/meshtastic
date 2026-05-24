@@ -64,7 +64,8 @@
   :group 'meshtastic)
 
 (defcustom meshtastic-python-executable "python3"
-  "Python executable used to launch the bridge script."
+  "Python executable used to launch the bridge script.
+See also `python-shell-interpreter'."
   :type 'string
   :group 'meshtastic)
 
