@@ -22,4 +22,3 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "ARG"]
-ignore = ["UP009"]
