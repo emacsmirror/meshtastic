@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026  Andros Fenollosa <hi@andros.dev>
 """Meshtastic JSON bridge for meshtastic.el.
