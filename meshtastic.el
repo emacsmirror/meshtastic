@@ -920,13 +920,22 @@ TEXT is the message body; TARGET-TYPE and TARGET identify the conversation."
     (when (and entry (> (length entry) 2))
       (aref entry 2))))
 
-(defun meshtastic-traceroute ()
-  "Send a traceroute to the node at point via the bridge."
-  (interactive)
-  (let ((node-id (meshtastic--node-id-at-point)))
-    (if node-id
-        (meshtastic--send-traceroute node-id)
-      (user-error "No node at point"))))
+(defun meshtastic--node-id-context ()
+  "Return a contextual node ID from the current buffer.
+Tries the tabulated-list entry at point first, then the DM target."
+  (or (meshtastic--node-id-at-point)
+      (and (eq meshtastic--target-type 'dm) meshtastic--target)))
+
+;;;###autoload
+(defun meshtastic-traceroute (node-id)
+  "Send a traceroute to NODE-ID via the bridge.
+When called from the node list, uses the node at point.
+When called from a DM buffer, uses the DM target.
+Otherwise prompts for a node ID."
+  (interactive
+   (list (or (meshtastic--node-id-context)
+             (read-string "Node ID: "))))
+  (meshtastic--send-traceroute node-id))
 
 (defun meshtastic--send-traceroute (node-id)
   "Send a traceroute request to NODE-ID and show the traceroute buffer."
@@ -1062,9 +1071,11 @@ Handles both plain numbers and (degrees minutes direction) lists."
   "Send GPS position to NODE-ID.
 Uses `calendar-latitude' and `calendar-longitude' if set, otherwise
 falls back to the device GPS.  Signals an error if neither is available.
+When called from the node list, uses the node at point.
+When called from a DM buffer, uses the DM target.
 See also `calendar-latitude', `calendar-longitude'."
   (interactive
-   (list (or (meshtastic--node-id-at-point)
+   (list (or (meshtastic--node-id-context)
              (read-string "Node ID: "))))
   (unless meshtastic--connected
     (user-error "Not connected"))

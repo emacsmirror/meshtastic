@@ -88,7 +88,8 @@ Connects directly to a Meshtastic device over USB serial. No server or intermedi
 - **Delivery indicator**: sent messages show `·` (sent to bridge), `✓` (bridge confirmed send) or `✗` (failed).
 - **Desktop notifications**: get notified when new messages arrive in background buffers.
 - **Input history**: navigate previous inputs with `M-p` / `M-n`.
-- **Traceroute**: press `t` on a node to send a traceroute via the CLI.
+- **Traceroute**: send a traceroute to a node and see the hop path and SNR values in a dedicated log buffer. Works from the node list (`t`), a DM chat (`M-x meshtastic-traceroute`), or any buffer (prompts for a node ID).
+- **Send position**: send your GPS coordinates to a node via `M-x meshtastic-send-position`. Uses `calendar-latitude` / `calendar-longitude` if set, otherwise falls back to the device GPS. Works from the node list, a DM chat, or any buffer.
 
 ## Keymap
 
@@ -110,6 +111,13 @@ Connects directly to a Meshtastic device over USB serial. No server or intermedi
 | `M-p`     | Previous input from history  |
 | `M-n`     | Next input from history      |
 | `C-c C-l` | Reload buffered messages     |
+
+### Commands available from any buffer
+
+| Command                        | Description                                      |
+|--------------------------------|--------------------------------------------------|
+| `M-x meshtastic-traceroute`    | Traceroute to a node (uses DM target if in DM)   |
+| `M-x meshtastic-send-position` | Send GPS position (uses DM target if in DM)      |
 
 ## Requirements
 
