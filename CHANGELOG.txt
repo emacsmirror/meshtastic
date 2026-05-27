@@ -1,0 +1,25 @@
+meshtastic.el changelog
+
+## 1.1.0 (2026-05-27)
+
+- Traceroute now works from DM chat buffers (M-x meshtastic-traceroute)
+  and prompts for a node ID when called from any other buffer.
+- meshtastic-send-position now works from DM chat buffers and prompts
+  for a node ID when called from any other buffer.
+- Added meshtastic--node-id-context helper for context-aware node resolution.
+
+## 1.0.0 (2026-05-27)
+
+- Initial stable release.
+- Welcome screen shows Connecting... status while bridge starts and
+  auto-displays Statistics (nodes, channels) on connect without manual refresh.
+- Traceroute command: sends a traceroute to a node via the bridge and
+  shows the hop path with SNR values in a dedicated async log buffer.
+- Send position command: sends GPS coordinates to a node, using
+  calendar-latitude/calendar-longitude or device GPS as fallback.
+- Channel list, node list, DM and channel chat buffers.
+- Delivery indicator: pending (.), confirmed (checkmark), failed (x).
+- Desktop notifications for messages in background buffers.
+- Input history navigation with M-p / M-n.
+- Python bridge (meshtastic-bridge.py) with SPDX license header.
+- Test suite (pytest) covering bridge commands and event handlers.
