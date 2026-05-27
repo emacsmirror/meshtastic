@@ -65,6 +65,17 @@ Connects directly to a Meshtastic device over USB serial. No server or intermedi
   3     ⚫ Mountain Peak               !f2a3b4c5       1h          -
 ```
 
+### Traceroute log (`M-x meshtastic-traceroute` or `t` in node list)
+
+```
+[08:30:01] → Solar Node 7 (!d4e5f6a7)
+  ✓ → Hilltop Relay → BaseStation K9 (8.0dB) → Solar Node 7
+  ← Solar Node 7 → BaseStation K9 (7.0dB) → Hilltop Relay
+
+[08:31:15] → Mountain Peak (!f2a3b4c5)
+  ⧖ Pending...
+```
+
 ### Chat buffer (channel or DM)
 
 ```
