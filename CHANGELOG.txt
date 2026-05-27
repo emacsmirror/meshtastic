@@ -7,6 +7,12 @@ meshtastic.el changelog
 - meshtastic-send-position now works from DM chat buffers and prompts
   for a node ID when called from any other buffer.
 - Added meshtastic--node-id-context helper for context-aware node resolution.
+- Telemetry: bridge subscribes to meshtastic.receive.telemetry and emits
+  battery level, voltage, temperature and other metrics per node. Battery
+  percentage is displayed in a new column in the node list.
+- Real-time node list: bridge subscribes to meshtastic.node.updated so the
+  node list updates automatically when nodes exchange information on the mesh
+  (new nodes, name or hardware changes), without needing to press g.
 
 ## 1.0.0 (2026-05-27)
 

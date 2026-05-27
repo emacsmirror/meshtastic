@@ -58,11 +58,11 @@ Connects directly to a Meshtastic device over USB serial. No server or intermedi
 ### Node list (`M-x meshtastic-nodes`)
 
 ```
-  Hops  Name                           Node ID         Last heard
-  0     🟢 Hilltop Relay               !a1b2c3d4       now
-  1     🟢 Solar Node 7                !d4e5f6a7       12m
-  2     🟢 BaseStation K9              !b8c9d0e1       5m
-  3     ⚫ Mountain Peak               !f2a3b4c5       1h
+  Hops  Name                           Node ID         Last heard  Battery
+  0     🟢 Hilltop Relay               !a1b2c3d4       now         85%
+  1     🟢 Solar Node 7                !d4e5f6a7       12m         -
+  2     🟢 BaseStation K9              !b8c9d0e1       5m          62%
+  3     ⚫ Mountain Peak               !f2a3b4c5       1h          -
 ```
 
 ### Chat buffer (channel or DM)
@@ -90,6 +90,8 @@ Connects directly to a Meshtastic device over USB serial. No server or intermedi
 - **Input history**: navigate previous inputs with `M-p` / `M-n`.
 - **Traceroute**: send a traceroute to a node and see the hop path and SNR values in a dedicated log buffer. Works from the node list (`t`), a DM chat (`M-x meshtastic-traceroute`), or any buffer (prompts for a node ID).
 - **Send position**: send your GPS coordinates to a node via `M-x meshtastic-send-position`. Uses `calendar-latitude` / `calendar-longitude` if set, otherwise falls back to the device GPS. Works from the node list, a DM chat, or any buffer.
+- **Telemetry**: battery level (and other device metrics) is shown in the Battery column of the node list as percentages arrive from the mesh. Nodes that have not sent telemetry show `-`.
+- **Real-time node list**: the node list updates automatically when nodes exchange information on the mesh (new nodes appearing, name or hardware changes), without needing to press `g`.
 
 ## Keymap
 
@@ -260,6 +262,12 @@ Key options:
 - `meshtastic-notify` (default `t`): enable desktop notifications (via D-Bus).
 - `meshtastic-timestamp-format` (default `"%H:%M"`): format for message timestamps.
 - `meshtastic-message-history` (default `200`): number of messages kept in memory per channel or DM.
+
+## Contributing
+
+Bug reports, feature requests and pull requests are welcome. Please read the contribution guidelines before opening an issue or PR:
+
+https://git.andros.dev/andros/contribute
 
 ## Development
 

@@ -87,7 +87,7 @@ def _on_telemetry(packet, interface):  # noqa: ARG001
         _emit({"type": "error", "message": f"Telemetry error: {exc}"})
 
 
-def _on_node_updated(node):
+def _on_node_updated(node, interface):  # noqa: ARG001
     """Handle a meshtastic.node.updated event."""
     try:
         user = (node or {}).get("user", {})

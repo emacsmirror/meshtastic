@@ -891,6 +891,13 @@ class TestOnTelemetry:
         msgs = _parse_stdout(capsys)
         assert msgs[0]["from"] == "!cafebabe"
 
+    def test_falls_back_to_from_num_when_no_fromId(self, capsys):
+        pkt = _telemetry_packet()
+        del pkt["fromId"]
+        bridge._on_telemetry(pkt, MagicMock())
+        msgs = _parse_stdout(capsys)
+        assert msgs[0]["from"] == "!aabbccdd"
+
     def test_broken_packet_emits_error(self, capsys):
         bridge._on_telemetry(None, MagicMock())
         msgs = _parse_stdout(capsys)
@@ -921,7 +928,7 @@ def _node_updated_payload(**overrides):
 
 class TestOnNodeUpdated:
     def test_emits_node_updated_event(self, capsys):
-        bridge._on_node_updated(_node_updated_payload())
+        bridge._on_node_updated(_node_updated_payload(), MagicMock())
         msgs = _parse_stdout(capsys)
         assert len(msgs) == 1
         m = msgs[0]
@@ -931,7 +938,7 @@ class TestOnNodeUpdated:
         assert m["shortName"] == "UN"
 
     def test_hops_and_last_heard_are_included(self, capsys):
-        bridge._on_node_updated(_node_updated_payload())
+        bridge._on_node_updated(_node_updated_payload(), MagicMock())
         msgs = _parse_stdout(capsys)
         m = msgs[0]
         assert m["hopsAway"] == 2
@@ -941,12 +948,16 @@ class TestOnNodeUpdated:
     def test_node_id_falls_back_to_num(self, capsys):
         node = _node_updated_payload()
         node["user"] = {}
-        bridge._on_node_updated(node)
+        bridge._on_node_updated(node, MagicMock())
         msgs = _parse_stdout(capsys)
         assert msgs[0]["nodeId"] == "!aabbccdd"
 
     def test_none_node_emits_no_output(self, capsys):
-        bridge._on_node_updated(None)
+        bridge._on_node_updated(None, MagicMock())
+        assert capsys.readouterr().out == ""
+
+    def test_node_with_no_id_and_zero_num_emits_no_output(self, capsys):
+        bridge._on_node_updated({"num": 0, "user": {}}, MagicMock())
         assert capsys.readouterr().out == ""
 
     def test_broken_node_emits_error(self, capsys):
@@ -954,6 +965,6 @@ class TestOnNodeUpdated:
             def get(self, *_a, **_k):
                 raise RuntimeError("boom")
 
-        bridge._on_node_updated(BadNode())
+        bridge._on_node_updated(BadNode(), MagicMock())
         msgs = _parse_stdout(capsys)
         assert msgs[0]["type"] == "error"
