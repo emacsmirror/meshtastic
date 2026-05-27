@@ -181,6 +181,9 @@ See also `python-shell-interpreter'."
 (defvar meshtastic--cmd-counter 0
   "Monotonic counter for generating unique command IDs.")
 
+(defvar meshtastic--traceroute-entries (make-hash-table :test 'equal)
+  "Hash table mapping cmd-id to (status-start-marker . status-end-marker).")
+
 (defvar meshtastic--pending-cmds (make-hash-table :test 'equal)
   "Hash table mapping cmd-id string to a delivery callback function.")
 
@@ -344,14 +347,15 @@ See also `python-shell-interpreter'."
              (obj (json-read-from-string line))
              (type (alist-get 'type obj)))
         (pcase type
-          ("connected" (meshtastic--on-connected obj))
-          ("message"   (meshtastic--on-message obj))
-          ("nodes"     (meshtastic--on-nodes obj))
-          ("channels"  (meshtastic--on-channels obj))
-          ("info"      (meshtastic--on-info obj))
-          ("sent"      (meshtastic--on-sent obj))
-          ("error"     (message "Meshtastic bridge: %s"
-                                (alist-get 'message obj)))))
+          ("connected"  (meshtastic--on-connected obj))
+          ("message"    (meshtastic--on-message obj))
+          ("nodes"      (meshtastic--on-nodes obj))
+          ("channels"   (meshtastic--on-channels obj))
+          ("info"       (meshtastic--on-info obj))
+          ("sent"       (meshtastic--on-sent obj))
+          ("traceroute" (meshtastic--on-traceroute obj))
+          ("error"      (message "Meshtastic bridge: %s"
+                                 (alist-get 'message obj)))))
     (error (message "Meshtastic bridge stderr: %s" line))))
 
 (defun meshtastic--start ()
@@ -454,6 +458,17 @@ See also `python-shell-interpreter'."
     (when cb
       (remhash cmd-id meshtastic--pending-cmds)
       (funcall cb 'confirmed))))
+
+(defun meshtastic--on-traceroute (obj)
+  "Handle a traceroute response OBJ from the bridge."
+  (let ((cmd-id    (alist-get 'id obj))
+        (dest-id   (alist-get 'dest obj))
+        (route     (alist-get 'route obj))
+        (route-back (alist-get 'routeBack obj))
+        (snr-fwd   (alist-get 'snrTowards obj))
+        (snr-back  (alist-get 'snrBack obj)))
+    (meshtastic--traceroute-set-result
+     cmd-id dest-id route route-back snr-fwd snr-back)))
 
 ;;;; Delivery icons
 
@@ -906,21 +921,164 @@ TEXT is the message body; TARGET-TYPE and TARGET identify the conversation."
       (aref entry 2))))
 
 (defun meshtastic-traceroute ()
-  "Send a traceroute to the node at point using the meshtastic CLI."
+  "Send a traceroute to the node at point via the bridge."
   (interactive)
   (let ((node-id (meshtastic--node-id-at-point)))
     (if node-id
-        (progn
-          (message "Meshtastic: traceroute to %s..." node-id)
-          (make-process
-           :name "meshtastic-traceroute"
-           :command (list "meshtastic"
-                          "--port" meshtastic-serial-port
-                          "--traceroute" node-id)
-           :noquery t
-           :filter (lambda (_proc str)
-                     (message "Traceroute: %s" (string-trim str)))))
+        (meshtastic--send-traceroute node-id)
       (user-error "No node at point"))))
+
+(defun meshtastic--send-traceroute (node-id)
+  "Send a traceroute request to NODE-ID and show the traceroute buffer."
+  (unless meshtastic--connected
+    (user-error "Not connected"))
+  (let ((cmd-id (meshtastic--cmd-id)))
+    (meshtastic--traceroute-append cmd-id node-id)
+    (meshtastic--send-cmd
+     `((action   . "traceroute")
+       (id       . ,cmd-id)
+       (dest     . ,node-id)
+       (hopLimit . 7)))
+    (display-buffer (meshtastic--traceroute-buffer))
+    (message "Meshtastic: traceroute to %s..."
+             (meshtastic--node-name node-id))))
+
+;;;; Traceroute buffer
+
+(defvar meshtastic-traceroute-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "q") #'quit-window)
+    map)
+  "Keymap for `meshtastic-traceroute-mode'.")
+
+(define-derived-mode meshtastic-traceroute-mode special-mode "MeshTrace"
+  "Major mode for the Meshtastic traceroute log."
+  :group 'meshtastic
+  (buffer-disable-undo)
+  (setq truncate-lines t))
+
+(defun meshtastic--traceroute-buffer ()
+  "Return the traceroute log buffer, creating it if needed."
+  (let ((buf (get-buffer-create "*Meshtastic: Traceroute*")))
+    (with-current-buffer buf
+      (unless (derived-mode-p 'meshtastic-traceroute-mode)
+        (meshtastic-traceroute-mode)))
+    buf))
+
+(defun meshtastic--format-route-segment (nodes snrs)
+  "Return \" → node (snr)\" string for each element in NODES paired with SNRS."
+  (let ((result ""))
+    (cl-mapcar
+     (lambda (node snr)
+       (setq result
+             (concat result
+                     (format " → %s%s"
+                             (meshtastic--node-name node)
+                             (if snr (format " (%.1fdB)" snr) "")))))
+     nodes
+     (append snrs (make-list (max 0 (- (length nodes) (length snrs))) nil)))
+    result))
+
+(defun meshtastic--traceroute-format-result (dest-id route route-back snr-fwd snr-back)
+  "Return formatted multi-line status for a completed traceroute to DEST-ID.
+ROUTE and ROUTE-BACK are lists of intermediate node ID strings.
+SNR-FWD and SNR-BACK are lists of SNR floats (dB) for each hop."
+  (let* ((local (or meshtastic--my-long-name meshtastic--my-node-id "Local"))
+         (dest  (meshtastic--node-name dest-id))
+         (fwd   (concat local
+                        (meshtastic--format-route-segment route snr-fwd)
+                        " → " dest))
+         (bck   (concat dest
+                        (meshtastic--format-route-segment route-back snr-back)
+                        " → " local)))
+    (concat
+     (propertize (format "  ✓ → %s\n" fwd) 'face 'meshtastic-delivery-confirmed-face)
+     (propertize (format "  ← %s\n" bck) 'face 'meshtastic-system-face))))
+
+(defun meshtastic--traceroute-append (cmd-id dest-id)
+  "Append a pending entry for CMD-ID targeting DEST-ID to the traceroute buffer."
+  (let ((buf (meshtastic--traceroute-buffer)))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (goto-char (point-max))
+        (insert (format "[%s] → %s (%s)\n"
+                        (format-time-string "%H:%M:%S")
+                        (meshtastic--node-name dest-id)
+                        dest-id))
+        (let ((s-start (copy-marker (point))))
+          (insert "  ⧖ Pending...\n")
+          (let ((s-end (copy-marker (point))))
+            (insert "\n")
+            (puthash cmd-id (cons s-start s-end)
+                     meshtastic--traceroute-entries)))))))
+
+(defun meshtastic--traceroute-set-result (cmd-id dest-id route route-back snr-fwd snr-back)
+  "Replace the pending status for CMD-ID with route result data.
+DEST-ID is the destination node ID.  ROUTE and ROUTE-BACK are lists of
+intermediate node ID strings.  SNR-FWD and SNR-BACK are SNR floats in dB."
+  (let* ((entry (gethash cmd-id meshtastic--traceroute-entries))
+         (buf   (get-buffer "*Meshtastic: Traceroute*")))
+    (when (and entry (buffer-live-p buf))
+      (let ((s-start (car entry))
+            (s-end   (cdr entry)))
+        (when (and (marker-buffer s-start) (marker-buffer s-end))
+          (with-current-buffer buf
+            (let ((inhibit-read-only t))
+              (delete-region s-start s-end)
+              (save-excursion
+                (goto-char s-start)
+                (insert (meshtastic--traceroute-format-result
+                         dest-id route route-back snr-fwd snr-back)))))
+          (remhash cmd-id meshtastic--traceroute-entries))))))
+
+;;;; Position
+
+(defun meshtastic--calendar-to-float (val)
+  "Convert calendar coordinate VAL to a float.
+Handles both plain numbers and (degrees minutes direction) lists."
+  (cond
+   ((numberp val) (float val))
+   ((and (listp val) (>= (length val) 2))
+    (let* ((deg (float (nth 0 val)))
+           (min (float (nth 1 val)))
+           (dir (nth 2 val))
+           (abs (+ deg (/ min 60.0))))
+      (if (memq dir '(south west)) (- abs) abs)))
+   (t nil)))
+
+(defun meshtastic--get-emacs-position ()
+  "Return (lat lon) from Emacs calendar variables, or nil if not set."
+  (when (and (boundp 'calendar-latitude)
+             (boundp 'calendar-longitude)
+             calendar-latitude
+             calendar-longitude)
+    (let ((lat (meshtastic--calendar-to-float calendar-latitude))
+          (lon (meshtastic--calendar-to-float calendar-longitude)))
+      (when (and lat lon)
+        (list lat lon)))))
+
+;;;###autoload
+(defun meshtastic-send-position (node-id)
+  "Send GPS position to NODE-ID.
+Uses `calendar-latitude' and `calendar-longitude' if set, otherwise
+falls back to the device GPS.  Signals an error if neither is available.
+See also `calendar-latitude', `calendar-longitude'."
+  (interactive
+   (list (or (meshtastic--node-id-at-point)
+             (read-string "Node ID: "))))
+  (unless meshtastic--connected
+    (user-error "Not connected"))
+  (let* ((pos     (meshtastic--get-emacs-position))
+         (cmd-id  (meshtastic--cmd-id))
+         (alist   `((action . "sendposition")
+                    (id     . ,cmd-id)
+                    (dest   . ,node-id))))
+    (when pos
+      (push `(lon . ,(cadr pos)) alist)
+      (push `(lat . ,(car  pos)) alist))
+    (meshtastic--send-cmd alist)
+    (message "Meshtastic: sending position to %s..."
+             (meshtastic--node-name node-id))))
 
 ;;;; Welcome buffer
 
@@ -1081,6 +1239,7 @@ TEXT is the message body; TARGET-TYPE and TARGET identify the conversation."
   (clrhash meshtastic--nodes)
   (clrhash meshtastic--message-rings)
   (clrhash meshtastic--pending-cmds)
+  (clrhash meshtastic--traceroute-entries)
   (message "Meshtastic: disconnected"))
 
 (defun meshtastic-refresh ()

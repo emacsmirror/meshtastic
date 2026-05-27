@@ -50,10 +50,12 @@ _spec.loader.exec_module(bridge)
 def reset_globals():
     """Reset module-level state between tests."""
     bridge._iface = None
+    bridge._pending_traceroutes.clear()
     _mock_serial_iface_module.SerialInterface.reset_mock()
     _mock_pub.reset_mock()
     yield
     bridge._iface = None
+    bridge._pending_traceroutes.clear()
 
 
 def _parse_stdout(capsys) -> list[dict]:
@@ -600,3 +602,219 @@ class TestMainLoop:
         _mock_serial_iface_module.SerialInterface.assert_called_once_with(
             devPath="/dev/cu.usbserial-0001"
         )
+
+
+# ===========================================================================
+# _on_traceroute
+# ===========================================================================
+
+
+def _traceroute_packet(**overrides):
+    """Build a minimal traceroute response packet dict."""
+    pkt = {
+        "from": 0xAABBCCDD,
+        "fromId": "!aabbccdd",
+        "requestId": 999,
+        "decoded": {
+            "portnum": "TRACEROUTE_APP",
+            "routeDiscovery": {
+                "route": [0x11111111, 0x22222222],
+                "snrTowards": [32, 24],   # 8.0 dB, 6.0 dB (scaled ×4)
+                "routeBack": [0x22222222, 0x11111111],
+                "snrBack": [16, 28],      # 4.0 dB, 7.0 dB
+            },
+        },
+    }
+    pkt.update(overrides)
+    return pkt
+
+
+class TestOnTraceroute:
+    def test_emits_traceroute_event(self, capsys):
+        bridge._pending_traceroutes["!aabbccdd"] = "cmd-42"
+        bridge._on_traceroute(_traceroute_packet(), MagicMock())
+        msgs = _parse_stdout(capsys)
+        assert len(msgs) == 1
+        m = msgs[0]
+        assert m["type"] == "traceroute"
+        assert m["dest"] == "!aabbccdd"
+        assert m["id"] == "cmd-42"
+
+    def test_route_nodes_are_converted_to_node_ids(self, capsys):
+        bridge._on_traceroute(_traceroute_packet(), MagicMock())
+        msgs = _parse_stdout(capsys)
+        assert msgs[0]["route"] == ["!11111111", "!22222222"]
+        assert msgs[0]["routeBack"] == ["!22222222", "!11111111"]
+
+    def test_snr_values_are_divided_by_four(self, capsys):
+        bridge._on_traceroute(_traceroute_packet(), MagicMock())
+        msgs = _parse_stdout(capsys)
+        assert msgs[0]["snrTowards"] == [8.0, 6.0]
+        assert msgs[0]["snrBack"] == [4.0, 7.0]
+
+    def test_removes_pending_entry_after_response(self, capsys):
+        bridge._pending_traceroutes["!aabbccdd"] = "cmd-1"
+        bridge._on_traceroute(_traceroute_packet(), MagicMock())
+        assert "!aabbccdd" not in bridge._pending_traceroutes
+
+    def test_unknown_dest_emits_event_with_none_id(self, capsys):
+        # No pending entry for this dest — id should be None.
+        bridge._on_traceroute(_traceroute_packet(), MagicMock())
+        msgs = _parse_stdout(capsys)
+        assert msgs[0]["id"] is None
+
+    def test_empty_route_is_direct_connection(self, capsys):
+        pkt = _traceroute_packet()
+        pkt["decoded"]["routeDiscovery"] = {"route": [], "routeBack": []}
+        bridge._on_traceroute(pkt, MagicMock())
+        msgs = _parse_stdout(capsys)
+        assert msgs[0]["route"] == []
+        assert msgs[0]["routeBack"] == []
+
+    def test_broken_packet_emits_error(self, capsys):
+        bridge._on_traceroute(None, MagicMock())
+        msgs = _parse_stdout(capsys)
+        assert msgs[0]["type"] == "error"
+
+
+# ===========================================================================
+# traceroute action (main loop)
+# ===========================================================================
+
+
+class TestTracerouteAction:
+    def test_calls_sendTraceRoute_with_dest_and_hopLimit(self):
+        iface = _default_iface()
+        _run_main(
+            ['{"action": "traceroute", "dest": "!aabbccdd", "hopLimit": 5, "id": "cmd-1"}',
+             '{"action": "quit"}'],
+            iface=iface,
+        )
+        iface.sendTraceRoute.assert_called_once_with("!aabbccdd", hopLimit=5)
+
+    def test_stores_pending_entry_keyed_by_dest(self):
+        iface = _default_iface()
+        # Don't quit immediately so we can inspect state after the action.
+        # We patch stdin to send traceroute then quit.
+        _run_main(
+            ['{"action": "traceroute", "dest": "!aabbccdd", "id": "cmd-99"}',
+             '{"action": "quit"}'],
+            iface=iface,
+        )
+        # After main() returns the entry is consumed only by _on_traceroute;
+        # since the pubsub callback never fires in the test it stays present.
+        assert bridge._pending_traceroutes.get("!aabbccdd") == "cmd-99"
+
+    def test_default_hop_limit_is_seven(self):
+        iface = _default_iface()
+        _run_main(
+            ['{"action": "traceroute", "dest": "!aabbccdd", "id": "cmd-1"}',
+             '{"action": "quit"}'],
+            iface=iface,
+        )
+        iface.sendTraceRoute.assert_called_once_with("!aabbccdd", hopLimit=7)
+
+    def test_sendTraceRoute_exception_emits_error(self):
+        iface = _default_iface()
+        iface.sendTraceRoute.side_effect = Exception("radio busy")
+        msgs = _run_main(
+            ['{"action": "traceroute", "dest": "!aabbccdd", "id": "cmd-1"}',
+             '{"action": "quit"}'],
+            iface=iface,
+        )
+        errors = [m for m in msgs if m.get("type") == "error"]
+        assert len(errors) >= 1
+
+
+# ===========================================================================
+# sendposition action (main loop)
+# ===========================================================================
+
+
+class TestSendPositionAction:
+    def test_sends_position_with_explicit_coords(self):
+        iface = _default_iface()
+        _run_main(
+            ['{"action": "sendposition", "dest": "!aabbccdd",'
+             ' "lat": 40.7128, "lon": -74.0060, "alt": 10, "id": "cmd-1"}',
+             '{"action": "quit"}'],
+            iface=iface,
+        )
+        iface.sendPosition.assert_called_once_with(
+            latitude=40.7128,
+            longitude=-74.0060,
+            altitude=10,
+            destinationId="!aabbccdd",
+            wantAck=True,
+        )
+
+    def test_explicit_coords_emit_sent_confirmation(self):
+        iface = _default_iface()
+        msgs = _run_main(
+            ['{"action": "sendposition", "dest": "!aabbccdd",'
+             ' "lat": 40.0, "lon": -3.0, "id": "cmd-2"}',
+             '{"action": "quit"}'],
+            iface=iface,
+        )
+        sent = [m for m in msgs if m.get("type") == "sent"]
+        assert len(sent) == 1
+        assert sent[0]["id"] == "cmd-2"
+
+    def test_falls_back_to_device_gps_when_no_coords(self):
+        iface = _default_iface()
+        iface.getMyNodeInfo.return_value = {
+            "user": {"id": "!deadbeef", "longName": "Me", "shortName": "ME"},
+            "position": {"latitude": 51.5, "longitude": -0.1, "altitude": 5},
+        }
+        _run_main(
+            ['{"action": "sendposition", "dest": "!aabbccdd", "id": "cmd-3"}',
+             '{"action": "quit"}'],
+            iface=iface,
+        )
+        iface.sendPosition.assert_called_once_with(
+            latitude=51.5,
+            longitude=-0.1,
+            altitude=5,
+            destinationId="!aabbccdd",
+            wantAck=True,
+        )
+
+    def test_emits_error_when_no_gps_available(self):
+        iface = _default_iface()
+        iface.getMyNodeInfo.return_value = {
+            "user": {"id": "!deadbeef"},
+            "position": {},
+        }
+        msgs = _run_main(
+            ['{"action": "sendposition", "dest": "!aabbccdd", "id": "cmd-4"}',
+             '{"action": "quit"}'],
+            iface=iface,
+        )
+        errors = [m for m in msgs if m.get("type") == "error"]
+        assert len(errors) >= 1
+        assert "gps" in errors[0]["message"].lower() or "position" in errors[0]["message"].lower()
+
+    def test_zero_coordinates_are_accepted(self):
+        """Lat/lon 0.0 is a valid position (Gulf of Guinea), not a missing value."""
+        iface = _default_iface()
+        msgs = _run_main(
+            ['{"action": "sendposition", "dest": "!aabbccdd",'
+             ' "lat": 0.0, "lon": 0.0, "id": "cmd-5"}',
+             '{"action": "quit"}'],
+            iface=iface,
+        )
+        iface.sendPosition.assert_called_once()
+        sent = [m for m in msgs if m.get("type") == "sent"]
+        assert len(sent) == 1
+
+    def test_sendPosition_exception_emits_error(self):
+        iface = _default_iface()
+        iface.sendPosition.side_effect = Exception("no fix")
+        msgs = _run_main(
+            ['{"action": "sendposition", "dest": "!aabbccdd",'
+             ' "lat": 40.0, "lon": -3.0, "id": "cmd-6"}',
+             '{"action": "quit"}'],
+            iface=iface,
+        )
+        errors = [m for m in msgs if m.get("type") == "error"]
+        assert len(errors) >= 1

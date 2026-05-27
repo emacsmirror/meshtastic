@@ -23,6 +23,7 @@ except ImportError as exc:
     sys.exit(1)
 
 _iface = None
+_pending_traceroutes: dict = {}  # dest_node_id -> cmd_id
 
 
 def _emit(obj):
@@ -59,6 +60,33 @@ def _on_receive(packet, interface):  # noqa: ARG001
         )
     except Exception as exc:
         _emit({"type": "error", "message": str(exc)})
+
+
+def _on_traceroute(packet, interface):  # noqa: ARG001
+    """Handle an incoming traceroute response."""
+    try:
+        from_id = packet.get("fromId") or _node_id_from_num(packet.get("from", 0))
+        cmd_id = _pending_traceroutes.pop(from_id, None)
+        decoded = packet.get("decoded", {})
+        rd = decoded.get("routeDiscovery", {})
+        route = [_node_id_from_num(n) for n in (rd.get("route") or [])]
+        route_back = [_node_id_from_num(n) for n in (rd.get("routeBack") or [])]
+        # SNR values are stored scaled by 4 (0.25 dB resolution)
+        snr_towards = [(v / 4.0) for v in (rd.get("snrTowards") or [])]
+        snr_back = [(v / 4.0) for v in (rd.get("snrBack") or [])]
+        _emit(
+            {
+                "type": "traceroute",
+                "id": cmd_id,
+                "dest": from_id,
+                "route": route,
+                "routeBack": route_back,
+                "snrTowards": snr_towards,
+                "snrBack": snr_back,
+            }
+        )
+    except Exception as exc:
+        _emit({"type": "error", "message": f"Traceroute error: {exc}"})
 
 
 def _on_disconnect(interface, topic=pub.AUTO_TOPIC):  # noqa: ARG001
@@ -172,6 +200,7 @@ def main():
     port = sys.argv[1] if len(sys.argv) > 1 else None
 
     pub.subscribe(_on_receive, "meshtastic.receive.text")
+    pub.subscribe(_on_traceroute, "meshtastic.receive.traceroute")
     pub.subscribe(_on_connection, "meshtastic.connection.established")
     pub.subscribe(_on_disconnect, "meshtastic.connection.lost")
 
@@ -213,6 +242,43 @@ def main():
                     _send_channels()
                 elif action == "info":
                     _send_info()
+                elif action == "traceroute":
+                    dest = cmd.get("dest")
+                    hop_limit = int(cmd.get("hopLimit", 7))
+                    if dest and _iface:
+                        _pending_traceroutes[dest] = cmd_id
+                        _iface.sendTraceRoute(dest, hopLimit=hop_limit)
+                elif action == "sendposition":
+                    dest = cmd.get("dest")
+                    lat = cmd.get("lat")
+                    lon = cmd.get("lon")
+                    alt = cmd.get("alt", 0)
+                    if (lat is None or lon is None) and _iface:
+                        try:
+                            my_info = _iface.getMyNodeInfo() or {}
+                            pos = my_info.get("position") or {}
+                            lat = pos.get("latitude")
+                            lon = pos.get("longitude")
+                            alt = pos.get("altitude", 0)
+                        except Exception:
+                            pass
+                    if lat is not None and lon is not None and _iface and dest:
+                        _iface.sendPosition(
+                            latitude=float(lat),
+                            longitude=float(lon),
+                            altitude=int(alt or 0),
+                            destinationId=dest,
+                            wantAck=True,
+                        )
+                        _emit({"type": "sent", "id": cmd_id})
+                    else:
+                        _emit(
+                            {
+                                "type": "error",
+                                "message": "No GPS position available",
+                                "id": cmd_id,
+                            }
+                        )
                 elif action == "quit":
                     break
             except Exception as exc:
