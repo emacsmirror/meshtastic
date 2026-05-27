@@ -62,6 +62,54 @@ def _on_receive(packet, interface):  # noqa: ARG001
         _emit({"type": "error", "message": str(exc)})
 
 
+def _on_telemetry(packet, interface):  # noqa: ARG001
+    """Handle an incoming telemetry packet."""
+    try:
+        from_id = packet.get("fromId") or _node_id_from_num(packet.get("from", 0))
+        decoded = packet.get("decoded", {})
+        tel = decoded.get("telemetry", {})
+        dm = tel.get("deviceMetrics", {})
+        em = tel.get("environmentMetrics", {})
+        _emit(
+            {
+                "type": "telemetry",
+                "from": from_id,
+                "batteryLevel": dm.get("batteryLevel"),
+                "voltage": dm.get("voltage"),
+                "channelUtilization": dm.get("channelUtilization"),
+                "airUtilTx": dm.get("airUtilTx"),
+                "temperature": em.get("temperature"),
+                "relativeHumidity": em.get("relativeHumidity"),
+                "barometricPressure": em.get("barometricPressure"),
+            }
+        )
+    except Exception as exc:
+        _emit({"type": "error", "message": f"Telemetry error: {exc}"})
+
+
+def _on_node_updated(node):
+    """Handle a meshtastic.node.updated event."""
+    try:
+        user = (node or {}).get("user", {})
+        node_id = user.get("id") or _node_id_from_num((node or {}).get("num", 0))
+        if not node_id:
+            return
+        _emit(
+            {
+                "type": "nodeUpdated",
+                "nodeId": node_id,
+                "nodeNum": (node or {}).get("num"),
+                "longName": user.get("longName", ""),
+                "shortName": user.get("shortName", ""),
+                "hopsAway": (node or {}).get("hopsAway", 0),
+                "lastHeard": (node or {}).get("lastHeard", 0),
+                "snr": (node or {}).get("snr"),
+            }
+        )
+    except Exception as exc:
+        _emit({"type": "error", "message": f"Node updated error: {exc}"})
+
+
 def _on_traceroute(packet, interface):  # noqa: ARG001
     """Handle an incoming traceroute response."""
     try:
@@ -200,7 +248,9 @@ def main():
     port = sys.argv[1] if len(sys.argv) > 1 else None
 
     pub.subscribe(_on_receive, "meshtastic.receive.text")
+    pub.subscribe(_on_telemetry, "meshtastic.receive.telemetry")
     pub.subscribe(_on_traceroute, "meshtastic.receive.traceroute")
+    pub.subscribe(_on_node_updated, "meshtastic.node.updated")
     pub.subscribe(_on_connection, "meshtastic.connection.established")
     pub.subscribe(_on_disconnect, "meshtastic.connection.lost")
 

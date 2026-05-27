@@ -818,3 +818,142 @@ class TestSendPositionAction:
         )
         errors = [m for m in msgs if m.get("type") == "error"]
         assert len(errors) >= 1
+
+
+# ===========================================================================
+# _on_telemetry
+# ===========================================================================
+
+
+def _telemetry_packet(**overrides):
+    """Build a minimal telemetry packet dict."""
+    pkt = {
+        "from": 0xAABBCCDD,
+        "fromId": "!aabbccdd",
+        "decoded": {
+            "portnum": "TELEMETRY_APP",
+            "telemetry": {
+                "deviceMetrics": {
+                    "batteryLevel": 85,
+                    "voltage": 3.9,
+                    "channelUtilization": 5.0,
+                    "airUtilTx": 1.0,
+                },
+                "environmentMetrics": {
+                    "temperature": 22.5,
+                    "relativeHumidity": 60.0,
+                    "barometricPressure": 1013.25,
+                },
+            },
+        },
+    }
+    pkt.update(overrides)
+    return pkt
+
+
+class TestOnTelemetry:
+    def test_emits_telemetry_event(self, capsys):
+        bridge._on_telemetry(_telemetry_packet(), MagicMock())
+        msgs = _parse_stdout(capsys)
+        assert len(msgs) == 1
+        m = msgs[0]
+        assert m["type"] == "telemetry"
+        assert m["from"] == "!aabbccdd"
+
+    def test_device_metrics_are_present(self, capsys):
+        bridge._on_telemetry(_telemetry_packet(), MagicMock())
+        msgs = _parse_stdout(capsys)
+        m = msgs[0]
+        assert m["batteryLevel"] == 85
+        assert m["voltage"] == pytest.approx(3.9)
+        assert m["channelUtilization"] == pytest.approx(5.0)
+        assert m["airUtilTx"] == pytest.approx(1.0)
+
+    def test_environment_metrics_are_present(self, capsys):
+        bridge._on_telemetry(_telemetry_packet(), MagicMock())
+        msgs = _parse_stdout(capsys)
+        m = msgs[0]
+        assert m["temperature"] == pytest.approx(22.5)
+        assert m["relativeHumidity"] == pytest.approx(60.0)
+        assert m["barometricPressure"] == pytest.approx(1013.25)
+
+    def test_missing_metrics_are_none(self, capsys):
+        pkt = _telemetry_packet()
+        pkt["decoded"]["telemetry"] = {}
+        bridge._on_telemetry(pkt, MagicMock())
+        msgs = _parse_stdout(capsys)
+        assert msgs[0]["batteryLevel"] is None
+        assert msgs[0]["temperature"] is None
+
+    def test_prefers_fromId_over_from_num(self, capsys):
+        pkt = _telemetry_packet(fromId="!cafebabe")
+        bridge._on_telemetry(pkt, MagicMock())
+        msgs = _parse_stdout(capsys)
+        assert msgs[0]["from"] == "!cafebabe"
+
+    def test_broken_packet_emits_error(self, capsys):
+        bridge._on_telemetry(None, MagicMock())
+        msgs = _parse_stdout(capsys)
+        assert msgs[0]["type"] == "error"
+
+
+# ===========================================================================
+# _on_node_updated
+# ===========================================================================
+
+
+def _node_updated_payload(**overrides):
+    """Build a minimal node dict as passed to _on_node_updated."""
+    node = {
+        "num": 0xAABBCCDD,
+        "user": {
+            "id": "!aabbccdd",
+            "longName": "Updated Node",
+            "shortName": "UN",
+        },
+        "hopsAway": 2,
+        "lastHeard": 1_700_000_000,
+        "snr": 6.5,
+    }
+    node.update(overrides)
+    return node
+
+
+class TestOnNodeUpdated:
+    def test_emits_node_updated_event(self, capsys):
+        bridge._on_node_updated(_node_updated_payload())
+        msgs = _parse_stdout(capsys)
+        assert len(msgs) == 1
+        m = msgs[0]
+        assert m["type"] == "nodeUpdated"
+        assert m["nodeId"] == "!aabbccdd"
+        assert m["longName"] == "Updated Node"
+        assert m["shortName"] == "UN"
+
+    def test_hops_and_last_heard_are_included(self, capsys):
+        bridge._on_node_updated(_node_updated_payload())
+        msgs = _parse_stdout(capsys)
+        m = msgs[0]
+        assert m["hopsAway"] == 2
+        assert m["lastHeard"] == 1_700_000_000
+        assert m["snr"] == pytest.approx(6.5)
+
+    def test_node_id_falls_back_to_num(self, capsys):
+        node = _node_updated_payload()
+        node["user"] = {}
+        bridge._on_node_updated(node)
+        msgs = _parse_stdout(capsys)
+        assert msgs[0]["nodeId"] == "!aabbccdd"
+
+    def test_none_node_emits_no_output(self, capsys):
+        bridge._on_node_updated(None)
+        assert capsys.readouterr().out == ""
+
+    def test_broken_node_emits_error(self, capsys):
+        class BadNode:
+            def get(self, *_a, **_k):
+                raise RuntimeError("boom")
+
+        bridge._on_node_updated(BadNode())
+        msgs = _parse_stdout(capsys)
+        assert msgs[0]["type"] == "error"

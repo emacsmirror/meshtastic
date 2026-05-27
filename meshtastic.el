@@ -184,6 +184,9 @@ See also `python-shell-interpreter'."
 (defvar meshtastic--traceroute-entries (make-hash-table :test 'equal)
   "Hash table mapping cmd-id to (status-start-marker . status-end-marker).")
 
+(defvar meshtastic--telemetry (make-hash-table :test 'equal)
+  "Hash table mapping node ID strings to their latest telemetry alist.")
+
 (defvar meshtastic--pending-cmds (make-hash-table :test 'equal)
   "Hash table mapping cmd-id string to a delivery callback function.")
 
@@ -353,9 +356,11 @@ See also `python-shell-interpreter'."
           ("channels"   (meshtastic--on-channels obj))
           ("info"       (meshtastic--on-info obj))
           ("sent"       (meshtastic--on-sent obj))
-          ("traceroute" (meshtastic--on-traceroute obj))
-          ("error"      (message "Meshtastic bridge: %s"
-                                 (alist-get 'message obj)))))
+          ("traceroute"  (meshtastic--on-traceroute obj))
+          ("telemetry"   (meshtastic--on-telemetry obj))
+          ("nodeUpdated" (meshtastic--on-node-updated obj))
+          ("error"       (message "Meshtastic bridge: %s"
+                                  (alist-get 'message obj)))))
     (error (message "Meshtastic bridge stderr: %s" line))))
 
 (defun meshtastic--start ()
@@ -469,6 +474,26 @@ See also `python-shell-interpreter'."
         (snr-back  (alist-get 'snrBack obj)))
     (meshtastic--traceroute-set-result
      cmd-id dest-id route route-back snr-fwd snr-back)))
+
+(defun meshtastic--on-telemetry (obj)
+  "Handle a telemetry event OBJ from the bridge."
+  (let ((from (alist-get 'from obj)))
+    (when (and from (not (string-empty-p from)))
+      (puthash from obj meshtastic--telemetry)
+      (let ((buf (get-buffer "*Meshtastic: Nodes*")))
+        (when (buffer-live-p buf)
+          (with-current-buffer buf
+            (meshtastic--populate-node-list)))))))
+
+(defun meshtastic--on-node-updated (obj)
+  "Handle a nodeUpdated event OBJ from the bridge."
+  (let ((node-id (alist-get 'nodeId obj)))
+    (when (and node-id (not (string-empty-p node-id)))
+      (puthash node-id obj meshtastic--nodes)
+      (let ((buf (get-buffer "*Meshtastic: Nodes*")))
+        (when (buffer-live-p buf)
+          (with-current-buffer buf
+            (meshtastic--populate-node-list)))))))
 
 ;;;; Delivery icons
 
@@ -867,7 +892,8 @@ TEXT is the message body; TARGET-TYPE and TARGET identify the conversation."
         [("Hops" 5 meshtastic--sort-by-hops)
          ("Name" 30 t)
          ("Node ID" 14 t)
-         ("Last heard" 12 t)])
+         ("Last heard" 12 t)
+         ("Battery" 8 t)])
   (setq tabulated-list-padding 2)
   (setq tabulated-list-sort-key '("Hops"))
   (tabulated-list-init-header))
@@ -902,12 +928,18 @@ TEXT is the message body; TARGET-TYPE and TARGET identify the conversation."
               (last-heard (alist-get 'lastHeard node))
               (indicator  (if (meshtastic--node-online-p last-heard)
                               "🟢" "⚫")))
-         (push (list node-id
-                     (vector (number-to-string hops)
-                             (format "%s %s" indicator name)
-                             (or node-id "")
-                             (meshtastic--format-last-heard last-heard)))
-               entries)))
+         (let* ((tel     (gethash node-id meshtastic--telemetry))
+                (battery (and tel (alist-get 'batteryLevel tel)))
+                (bat-str (if (and battery (numberp battery))
+                             (format "%d%%" battery)
+                           "-")))
+           (push (list node-id
+                       (vector (number-to-string hops)
+                               (format "%s %s" indicator name)
+                               (or node-id "")
+                               (meshtastic--format-last-heard last-heard)
+                               bat-str))
+                 entries))))
      meshtastic--nodes)
     (setq tabulated-list-entries entries)
     (tabulated-list-print t)))
@@ -1251,6 +1283,7 @@ See also `calendar-latitude', `calendar-longitude'."
   (clrhash meshtastic--message-rings)
   (clrhash meshtastic--pending-cmds)
   (clrhash meshtastic--traceroute-entries)
+  (clrhash meshtastic--telemetry)
   (message "Meshtastic: disconnected"))
 
 (defun meshtastic-refresh ()
