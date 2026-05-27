@@ -4,7 +4,7 @@
 
 ;; Author: Andros Fenollosa <hi@andros.dev>
 ;; Maintainer: Andros Fenollosa <hi@andros.dev>
-;; Version: 1.0.0
+;; Version: 1.1.0
 ;; Package-Requires: ((emacs "28.1"))
 ;; Keywords: comm
 ;; URL: https://git.andros.dev/andros/meshtastic.el
