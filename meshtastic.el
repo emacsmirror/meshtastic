@@ -808,12 +808,14 @@ TEXT is the message body; TARGET-TYPE and TARGET identify the conversation."
                    (_ "Meshtastic")))
           (body  (truncate-string-to-width
                   (format "%s: %s" sender text) 100 nil nil "...")))
-      (notifications-notify
-       :title title
-       :body body
-       :app-name "Meshtastic"
-       :category "im.received"
-       :urgency 'normal))))
+      (condition-case nil
+          (notifications-notify
+           :title title
+           :body body
+           :app-name "Meshtastic"
+           :category "im.received"
+           :urgency 'normal)
+        (error nil)))))
 
 ;;;; Channel list mode
 
