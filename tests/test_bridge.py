@@ -11,7 +11,7 @@ import io
 import json
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, PropertyMock, call, patch
+from unittest.mock import ANY, MagicMock, PropertyMock, call, patch
 
 import pytest
 
@@ -29,9 +29,12 @@ _mock_pubsub_module.pub = _mock_pub
 _mock_meshtastic = MagicMock()
 _mock_serial_iface_module = MagicMock()
 _mock_meshtastic.serial_interface = _mock_serial_iface_module
+_mock_protobuf_module = MagicMock()
+_mock_meshtastic.protobuf = _mock_protobuf_module
 
 sys.modules.setdefault("meshtastic", _mock_meshtastic)
 sys.modules.setdefault("meshtastic.serial_interface", _mock_serial_iface_module)
+sys.modules.setdefault("meshtastic.protobuf", _mock_protobuf_module)
 sys.modules.setdefault("pubsub", _mock_pubsub_module)
 
 # Load the bridge module from its file path (hyphen in filename prevents normal import).
@@ -512,7 +515,7 @@ class TestMainLoop:
              '{"action": "quit"}'],
             iface=iface,
         )
-        iface.sendText.assert_called_once_with("hi", channelIndex=2, wantAck=False)
+        iface.sendText.assert_called_once_with("hi", channelIndex=2, wantAck=True, onResponse=ANY)
 
     def test_dm_send_passes_destinationId_and_wantAck(self):
         iface = _default_iface()
@@ -522,7 +525,11 @@ class TestMainLoop:
             iface=iface,
         )
         iface.sendText.assert_called_once_with(
-            "hi", channelIndex=0, destinationId="!aabbccdd", wantAck=True
+            "hi",
+            channelIndex=0,
+            destinationId="!aabbccdd",
+            wantAck=True,
+            onResponse=ANY,
         )
 
     def test_invalid_json_is_silently_ignored(self):
@@ -658,7 +665,7 @@ class TestOnTraceroute:
         assert "!aabbccdd" not in bridge._pending_traceroutes
 
     def test_unknown_dest_emits_event_with_none_id(self, capsys):
-        # No pending entry for this dest — id should be None.
+        # No pending entry for this dest, so id should be None.
         bridge._on_traceroute(_traceroute_packet(), MagicMock())
         msgs = _parse_stdout(capsys)
         assert msgs[0]["id"] is None
@@ -683,14 +690,27 @@ class TestOnTraceroute:
 
 
 class TestTracerouteAction:
-    def test_calls_sendTraceRoute_with_dest_and_hopLimit(self):
+    def test_calls_sendData_with_dest_and_hopLimit(self):
         iface = _default_iface()
         _run_main(
             ['{"action": "traceroute", "dest": "!aabbccdd", "hopLimit": 5, "id": "cmd-1"}',
              '{"action": "quit"}'],
             iface=iface,
         )
-        iface.sendTraceRoute.assert_called_once_with("!aabbccdd", hopLimit=5)
+        kwargs = iface.sendData.call_args.kwargs
+        assert kwargs["destinationId"] == "!aabbccdd"
+        assert kwargs["hopLimit"] == 5
+        assert kwargs["wantResponse"] is True
+
+    def test_does_not_use_blocking_sendTraceRoute(self):
+        """Regression: sendTraceRoute() blocks the stdin loop and prints to stdout."""
+        iface = _default_iface()
+        _run_main(
+            ['{"action": "traceroute", "dest": "!aabbccdd", "id": "cmd-1"}',
+             '{"action": "quit"}'],
+            iface=iface,
+        )
+        iface.sendTraceRoute.assert_not_called()
 
     def test_stores_pending_entry_keyed_by_dest(self):
         iface = _default_iface()
@@ -712,11 +732,11 @@ class TestTracerouteAction:
              '{"action": "quit"}'],
             iface=iface,
         )
-        iface.sendTraceRoute.assert_called_once_with("!aabbccdd", hopLimit=7)
+        assert iface.sendData.call_args.kwargs["hopLimit"] == 7
 
-    def test_sendTraceRoute_exception_emits_error(self):
+    def test_sendData_exception_emits_error(self):
         iface = _default_iface()
-        iface.sendTraceRoute.side_effect = Exception("radio busy")
+        iface.sendData.side_effect = Exception("radio busy")
         msgs = _run_main(
             ['{"action": "traceroute", "dest": "!aabbccdd", "id": "cmd-1"}',
              '{"action": "quit"}'],
@@ -968,3 +988,288 @@ class TestOnNodeUpdated:
         bridge._on_node_updated(BadNode(), MagicMock())
         msgs = _parse_stdout(capsys)
         assert msgs[0]["type"] == "error"
+
+
+# ===========================================================================
+# Node payload: hasPKC and unknown hops
+# ===========================================================================
+
+
+class TestNodeDict:
+    def test_has_pkc_true_when_public_key_present(self):
+        node = {"num": 1, "user": {"id": "!00000001", "publicKey": "abc="}}
+        assert bridge._node_dict(node, "!00000001")["hasPKC"] is True
+
+    def test_has_pkc_false_without_public_key(self):
+        node = {"num": 1, "user": {"id": "!00000001"}}
+        assert bridge._node_dict(node, "!00000001")["hasPKC"] is False
+
+    def test_unknown_hops_is_none(self):
+        node = {"num": 1, "user": {"id": "!00000001"}}
+        assert bridge._node_dict(node, "!00000001")["hopsAway"] is None
+
+    def test_zero_hops_is_preserved(self):
+        node = {"num": 1, "user": {}, "hopsAway": 0}
+        assert bridge._node_dict(node, "!00000001")["hopsAway"] == 0
+
+
+# ===========================================================================
+# Received message metadata: replies, reactions, relay
+# ===========================================================================
+
+
+class TestOnReceiveMetadata:
+    def test_reply_id_is_forwarded(self, capsys):
+        pkt = _text_packet(decoded={"portnum": "TEXT_MESSAGE_APP", "text": "ok", "replyId": 42})
+        bridge._on_receive(pkt, MagicMock())
+        assert _parse_stdout(capsys)[0]["replyId"] == 42
+
+    def test_emoji_flag_is_forwarded(self, capsys):
+        pkt = _text_packet(
+            decoded={"portnum": "TEXT_MESSAGE_APP", "text": "👍", "replyId": 42, "emoji": 1}
+        )
+        bridge._on_receive(pkt, MagicMock())
+        assert _parse_stdout(capsys)[0]["emoji"] == 1
+
+    def test_plain_message_has_no_reply_or_emoji(self, capsys):
+        bridge._on_receive(_text_packet(), MagicMock())
+        msg = _parse_stdout(capsys)[0]
+        assert msg["replyId"] is None
+        assert msg["emoji"] is None
+
+    def test_relay_and_mqtt_are_forwarded(self, capsys):
+        bridge._on_receive(_text_packet(relayNode=84, viaMqtt=True), MagicMock())
+        msg = _parse_stdout(capsys)[0]
+        assert msg["relayNode"] == 84
+        assert msg["viaMqtt"] is True
+
+
+# ===========================================================================
+# Firmware version in the connected event
+# ===========================================================================
+
+
+class TestFirmwareVersion:
+    def test_returns_version_string(self):
+        iface = MagicMock()
+        iface.metadata.firmware_version = "2.7.15.567b8ea"
+        assert bridge._firmware_version(iface) == "2.7.15.567b8ea"
+
+    def test_returns_empty_without_metadata(self):
+        iface = MagicMock()
+        iface.metadata = None
+        assert bridge._firmware_version(iface) == ""
+
+    def test_connected_event_includes_firmware(self, capsys):
+        iface = _default_iface()
+        iface.metadata.firmware_version = "2.7.15"
+        bridge._on_connection(iface)
+        assert _parse_stdout(capsys)[0]["firmware"] == "2.7.15"
+
+
+# ===========================================================================
+# Send: packet id, replies and reactions
+# ===========================================================================
+
+
+class TestSendAction:
+    def test_sent_event_includes_packet_id(self):
+        iface = _default_iface()
+        iface.sendText.return_value = MagicMock(id=123456)
+        msgs = _run_main(
+            ['{"action": "send", "text": "hi", "channel": 0, "id": "cmd-1"}',
+             '{"action": "quit"}'],
+            iface=iface,
+        )
+        sent = [m for m in msgs if m.get("type") == "sent"]
+        assert sent[0]["packetId"] == 123456
+
+    def test_reply_id_is_passed_to_sendText(self):
+        iface = _default_iface()
+        _run_main(
+            ['{"action": "send", "text": "yes", "channel": 0, "replyId": 77, "id": "cmd-1"}',
+             '{"action": "quit"}'],
+            iface=iface,
+        )
+        assert iface.sendText.call_args.kwargs["replyId"] == 77
+
+    def test_reaction_does_not_use_sendText(self):
+        iface = _default_iface()
+        iface._generatePacketId.return_value = 555
+        iface._sendPacket.return_value = MagicMock(id=555)
+        msgs = _run_main(
+            ['{"action": "send", "text": "👍", "channel": 1, "replyId": 77,'
+             ' "emoji": true, "id": "cmd-1"}',
+             '{"action": "quit"}'],
+            iface=iface,
+        )
+        iface.sendText.assert_not_called()
+        iface._sendPacket.assert_called_once()
+        assert iface._sendPacket.call_args.args[1] == "^all"
+        assert iface._sendPacket.call_args.kwargs["wantAck"] is True
+        sent = [m for m in msgs if m.get("type") == "sent"]
+        assert sent[0]["packetId"] == 555
+
+    def test_reaction_to_dm_targets_destination(self):
+        iface = _default_iface()
+        iface._generatePacketId.return_value = 1
+        _run_main(
+            ['{"action": "send", "text": "❤", "dest": "!aabbccdd", "replyId": 9,'
+             ' "emoji": true, "id": "cmd-1"}',
+             '{"action": "quit"}'],
+            iface=iface,
+        )
+        assert iface._sendPacket.call_args.args[1] == "!aabbccdd"
+
+    def test_reaction_registers_ack_handler(self):
+        iface = _default_iface()
+        iface._generatePacketId.return_value = 1
+        _run_main(
+            ['{"action": "send", "text": "❤", "channel": 0, "replyId": 9,'
+             ' "emoji": true, "id": "cmd-1"}',
+             '{"action": "quit"}'],
+            iface=iface,
+        )
+        iface._addResponseHandler.assert_called_once_with(1, ANY, ackPermitted=True)
+
+
+# ===========================================================================
+# ACK handler
+# ===========================================================================
+
+
+def _routing_packet(reason="NONE", from_id="!aabbccdd"):
+    return {
+        "fromId": from_id,
+        "decoded": {"portnum": "ROUTING_APP", "routing": {"errorReason": reason}},
+    }
+
+
+class TestAckHandler:
+    def test_callback_is_named_onAckNak(self):
+        """The library only delivers plain ACKs to callbacks with this name."""
+        assert bridge._ack_handler("cmd-1").__name__ == "onAckNak"
+
+    def test_ack_emits_ok(self, capsys):
+        bridge._ack_handler("cmd-1")(_routing_packet())
+        msg = _parse_stdout(capsys)[0]
+        assert msg == {
+            "type": "ack",
+            "id": "cmd-1",
+            "ok": True,
+            "reason": "NONE",
+            "from": "!aabbccdd",
+        }
+
+    def test_routing_without_error_reason_is_ack(self, capsys):
+        pkt = {"fromId": "!aabbccdd", "decoded": {"portnum": "ROUTING_APP", "routing": {}}}
+        bridge._ack_handler("cmd-1")(pkt)
+        assert _parse_stdout(capsys)[0]["ok"] is True
+
+    def test_nak_emits_failure_with_reason(self, capsys):
+        bridge._ack_handler("cmd-1")(_routing_packet("MAX_RETRANSMIT"))
+        msg = _parse_stdout(capsys)[0]
+        assert msg["ok"] is False
+        assert msg["reason"] == "MAX_RETRANSMIT"
+
+    def test_non_routing_response_is_ignored(self, capsys):
+        bridge._ack_handler("cmd-1")({"decoded": {"portnum": "TEXT_MESSAGE_APP"}})
+        assert capsys.readouterr().out == ""
+
+
+# ===========================================================================
+# Traceroute failures
+# ===========================================================================
+
+
+class TestTracerouteHandler:
+    def test_nak_emits_traceroute_error(self, capsys):
+        bridge._pending_traceroutes["!aabbccdd"] = "cmd-5"
+        bridge._traceroute_handler("!aabbccdd", "cmd-5")(_routing_packet("NO_RESPONSE"))
+        msg = _parse_stdout(capsys)[0]
+        assert msg == {
+            "type": "traceroute",
+            "id": "cmd-5",
+            "dest": "!aabbccdd",
+            "error": "NO_RESPONSE",
+        }
+        assert "!aabbccdd" not in bridge._pending_traceroutes
+
+    def test_traceroute_reply_is_left_to_pubsub(self, capsys):
+        bridge._traceroute_handler("!aabbccdd", "cmd-5")(
+            {"decoded": {"portnum": "TRACEROUTE_APP"}}
+        )
+        assert capsys.readouterr().out == ""
+
+
+# ===========================================================================
+# Request position
+# ===========================================================================
+
+
+class TestRequestPosition:
+    def test_sends_position_request_with_want_response(self):
+        iface = _default_iface()
+        _run_main(
+            ['{"action": "requestposition", "dest": "!aabbccdd", "id": "cmd-1"}',
+             '{"action": "quit"}'],
+            iface=iface,
+        )
+        kwargs = iface.sendData.call_args.kwargs
+        assert kwargs["destinationId"] == "!aabbccdd"
+        assert kwargs["wantResponse"] is True
+        iface.sendPosition.assert_not_called()
+
+    def test_position_reply_emits_coordinates(self, capsys):
+        pkt = {
+            "decoded": {
+                "portnum": "POSITION_APP",
+                "position": {"latitudeI": 394699000, "longitudeI": -3763000, "altitude": 15},
+            }
+        }
+        bridge._position_handler("!aabbccdd", "cmd-1")(pkt)
+        msg = _parse_stdout(capsys)[0]
+        assert msg["type"] == "position"
+        assert msg["from"] == "!aabbccdd"
+        assert msg["lat"] == pytest.approx(39.4699)
+        assert msg["lon"] == pytest.approx(-0.3763)
+        assert msg["alt"] == 15
+
+    def test_position_without_fix_has_none_coordinates(self, capsys):
+        pkt = {"decoded": {"portnum": "POSITION_APP", "position": {}}}
+        bridge._position_handler("!aabbccdd", "cmd-1")(pkt)
+        msg = _parse_stdout(capsys)[0]
+        assert msg["lat"] is None
+        assert msg["lon"] is None
+
+    def test_nak_emits_position_error(self, capsys):
+        bridge._position_handler("!aabbccdd", "cmd-1")(_routing_packet("NO_RESPONSE"))
+        msg = _parse_stdout(capsys)[0]
+        assert msg["error"] == "NO_RESPONSE"
+
+
+# ===========================================================================
+# stdout isolation
+# ===========================================================================
+
+
+class TestStdoutIsolation:
+    def test_library_prints_do_not_reach_event_stream(self):
+        iface = _default_iface()
+
+        def noisy_send(*_args, **_kwargs):
+            print("Route traced towards destination:")
+            return MagicMock(id=1)
+
+        iface.sendText.side_effect = noisy_send
+        msgs = _run_main(
+            ['{"action": "send", "text": "hi", "channel": 0, "id": "cmd-1"}',
+             '{"action": "quit"}'],
+            iface=iface,
+        )
+        assert all("_raw" not in m for m in msgs)
+
+    def test_stdout_is_restored_after_main(self):
+        before = sys.stdout
+        _run_main(['{"action": "quit"}'])
+        assert sys.stdout is before

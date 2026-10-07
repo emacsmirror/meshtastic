@@ -1,5 +1,51 @@
 meshtastic.el changelog
 
+## 1.2.0 (2026-10-07)
+
+New features:
+
+- Replies: C-c C-r answers the message at point, the prompt shows
+  [reply Name] and replies render with a "↩ Name:" indicator.
+  C-c C-k or C-g cancel the reply.
+- Emoji reactions: C-c C-e reacts to the message at point; reactions
+  are grouped in a "↳" line below the message.
+- Highlights: replies to you and mentions of your names or
+  meshtastic-keywords use meshtastic-highlight-face.
+- Real delivery tracking: the bridge requests an ACK for every message.
+  Icons: · waiting, green ✓ acknowledged, yellow ✓ DM heard by the mesh
+  but not confirmed by its recipient, ✗ failed (reason in the tooltip).
+- Long messages are split at word boundaries (meshtastic-max-message-bytes,
+  meshtastic-max-message-parts); the mode line shows the input size.
+- C-c C-i shows message details: hops, SNR, RSSI, relay node, MQTT, IDs.
+- C-c C-s resends the message at point, C-c C-d opens a DM with its sender.
+- Unread tracking with M-x meshtastic-unread and counts in the welcome
+  screen, channel list and DM list.
+- M-x meshtastic-direct-messages lists DM conversations of the session.
+- Node list: key icon for nodes with a public key (confirmation before a
+  DM without one), o toggles online-only, p requests a node position,
+  P sends yours, d opens a DM; unknown hop counts show ? and sort last.
+- M-x meshtastic-request-position asks a node for its position.
+- Welcome screen shows short name, firmware, uptime, online nodes,
+  message and unread counts, and the d and u shortcuts.
+- Notifications work on macOS (terminal-notifier or osascript) and Linux
+  (D-Bus or notify-send). meshtastic-notify accepts nil, highlights or
+  all; meshtastic-notify-method selects native, minibuffer, both or a
+  custom function.
+
+Fixes:
+
+- Timestamps and nicks were rendered without their faces.
+- A message in an open but hidden chat buffer notified twice.
+- Own messages disappeared when a chat buffer was reopened or refreshed.
+- Messages over 233 bytes failed silently with a pending icon forever.
+- Pending messages are marked as failed when the bridge stops.
+- Own messages showed the node ID before the node list arrived.
+- Traceroute no longer blocks the bridge command loop, failures and
+  timeouts are shown in the traceroute buffer.
+- Text printed by the meshtastic library no longer pollutes the JSON
+  event stream.
+- C-c C-l now redraws the whole chat buffer.
+
 ## 1.1.0 (2026-05-27)
 
 - Traceroute now works from DM chat buffers (M-x meshtastic-traceroute)
